@@ -10,6 +10,7 @@ use YAML qw(LoadFile);
 use Data::Dumper;
 use LWP::UserAgent;
 use LWP::UserAgent::DNS::Hosts;
+use Apache::ConfigParser;
 
 my $CONFIG;
 my $CONFIG_FILE = "agent_conf.yml";
@@ -84,9 +85,51 @@ sub check_local {
 		#ToDo: Create a Hash with the Report Info
 	}
 }; 
+sub check_services {
+	my ($apache_port,$ebd_server_port,$ebd_tserver_port,$mysql_server_port) = retrieve_ports();
+	my $port;
+	my %services = { apache => $apache_port,
+			 ebd_server => $ebd_server_port,
+			 ebd_tserver => $ebd_tserver_port,
+			 mysql_server => $mysql_server_port
+	      		 };
+	#Todo: each Loop in order to check the services
+	IO::Socket::Inet->new( PeerAddr => '127.0.0.1',
+			       PeerPort => $port,
+			       Proto    => 'tcp',
+			       Type     => 'SOCK_STREAM'
+			     );
+	
+	
+};
 
+sub retrieve_ports {
+	#ToDo:
+	#  -Retrieve the Apache Port from Listen directive on httpd.conf
+	#  Needs to get the EBD_HOME env variable in order to make it
+	#  Dynamic.
+
+	my $c1 = Apache::ConfigParser->new;
+	$c1->parse_file('/usr/eBDAS/conf/httpd.conf')
+	or die "Cannot Parse the Config File";
+	
+	#Somehow it works! finds the Listen Directive Value on the Apache
+	#httpd.conf File
+	my %parsed_config = map {
+        my ($directive) = ( $c1->find_down_directive_names($_) );
+        		defined($directive) ? ( $_, $directive->value ) : ()
+   	 		} qw(Listen);
+	my $apache_port = $parsed_config{Listen};
+	print $apache_port;
+
+	#  -Retrieve the ebd_server from ebd_config.xml file
+	#  -Retrieve the ebd_tserver port from ebd_config.xml or ebd.xml file
+	#  -retrieve the Catalog mysql server port from ebd_config.xml??
+};
 ################BEGIN##################
 
-load_config();
-check_global;
+#load_config();
+#check_services();
+#check_global;
 #check_local;
+retrieve_ports();
