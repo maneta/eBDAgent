@@ -12,7 +12,6 @@ use LWP::UserAgent;
 use LWP::UserAgent::DNS::Hosts;
 
 my $CONFIG;
-
 my $CONFIG_FILE = "agent_conf.yml";
 
 sub load_config {
@@ -36,15 +35,19 @@ sub load_config {
 }
 
 sub check_global {
+	my $global_response;
 	my $domains = $CONFIG->{domains};
 	my $ua = LWP::UserAgent->new;
  	$ua->timeout(10);
 	$ua->agent('eBDAgent/1.0');
  	foreach (@$domains) {
+		my $domain = $_;
 		eval{
-			my $response = $ua->get("http://$_/");
+			my $response = $ua->get("http://$domain/");
  
-			if ($response->is_success) {}
+			if ($response->is_success) {
+				$global_response = $response->title();
+			}
  			else {
      				die $response->status_line;
  			}
@@ -52,37 +55,38 @@ sub check_global {
 		if ($@) {
 			warn $@;
 			#ToDo: Create a Hash with the Report Info
+		}else{
+			check_local($domain,$global_response);
 		}
 	}
 };
 sub check_local {
-	my $domains = $CONFIG->{domains};
-        foreach (@$domains) {
-		LWP::UserAgent::DNS::Hosts->register_host("$_" => '127.0.0.1',);
-		LWP::UserAgent::DNS::Hosts->enable_override;
-		my $ua = LWP::UserAgent->new;
-		$ua->timeout(10);
-		$ua->agent('eBDAgent/1.0');
-                eval{
-                        my $response = $ua->get("http://$_:8080");
-
-                        if ($response->is_success) {
-                                print $response->decoded_content;
-				#next;
-                        }
-                        else {
-                                die $response->status_line;
-                        }
-                };
-                if ($@) {
-                        warn $@;
-			#ToDo: Create a Hash with the Report Info
+	my ($domain,$global_response) = @_;
+	my $local_response;
+	LWP::UserAgent::DNS::Hosts->register_host("$_" => '127.0.0.1',);
+	LWP::UserAgent::DNS::Hosts->enable_override;
+	my $ua = LWP::UserAgent->new;
+	$ua->timeout(10);
+	$ua->agent('eBDAgent/1.0');
+        
+	eval{
+        	my $response = $ua->get("http://$_:8080");
+		if ($response->is_success) {
+			$local_response = $response->title();
+			die  "Local HTML Title: $local_response does not Match with Global HTML Title: $global_response"
+			unless ($local_response eq $global_response);
+		}else{
+                	die $response->status_line;
                 }
-        }
+	};
+        if ($@) {
+		warn $@;
+		#ToDo: Create a Hash with the Report Info
+	}
 }; 
 
 ################BEGIN##################
 
 load_config();
 check_global;
-check_local;
+#check_local;
