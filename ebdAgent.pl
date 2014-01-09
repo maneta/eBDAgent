@@ -11,9 +11,15 @@ use Data::Dumper;
 use LWP::UserAgent;
 use LWP::UserAgent::DNS::Hosts;
 use Apache::ConfigParser;
+use XML::Simple;
+use IO::Socket::INET;
 
 my $CONFIG;
 my $CONFIG_FILE = "agent_conf.yml";
+my $APACHE_PORT;
+my $EBD_SERVER_PORT;
+my $EBD_TSERVER_PORT;
+my $MYSQL_SERVER_PORT;
 
 sub load_config {
 ##Read The Configuration from a YAML file. 
@@ -71,7 +77,7 @@ sub check_local {
 	$ua->agent('eBDAgent/1.0');
         
 	eval{
-        	my $response = $ua->get("http://$_:8080");
+        	my $response = $ua->get("http://$_:$APACHE_PORT");
 		if ($response->is_success) {
 			$local_response = $response->title();
 			die  "Local HTML Title: $local_response does not Match with Global HTML Title: $global_response"
@@ -86,21 +92,28 @@ sub check_local {
 	}
 }; 
 sub check_services {
-	my ($apache_port,$ebd_server_port,$ebd_tserver_port,$mysql_server_port) = retrieve_ports();
-	my $port;
-	my %services = { apache => $apache_port,
-			 ebd_server => $ebd_server_port,
-			 ebd_tserver => $ebd_tserver_port,
-			 mysql_server => $mysql_server_port
-	      		 };
-	#Todo: each Loop in order to check the services
-	IO::Socket::Inet->new( PeerAddr => '127.0.0.1',
-			       PeerPort => $port,
-			       Proto    => 'tcp',
-			       Type     => 'SOCK_STREAM'
-			     );
+	my %services = ( apache => $APACHE_PORT,
+			 ebd_server => $EBD_SERVER_PORT,
+			 ebd_tserver => $EBD_TSERVER_PORT,
+			 mysql_server => $MYSQL_SERVER_PORT
+	      		 );
+
+	while (my ($service, $port) = each %services){
+    
+		my $socket = IO::Socket::INET->new( PeerAddr => '127.0.0.1',
+		                		    PeerPort => $port,
+				                    Proto    => 'tcp'
+				                    #Type     => 'SOCK_STREAM'
+			    	                    );
+		if ($socket) {
+			warn "The service $service on port $port is UP!\n";
+                }else{
+			warn "The service $service on port $port is DOWN!\n";
+                }	
+		
+	}
 	
-	
+		
 };
 
 sub retrieve_ports {
@@ -119,17 +132,32 @@ sub retrieve_ports {
         my ($directive) = ( $c1->find_down_directive_names($_) );
         		defined($directive) ? ( $_, $directive->value ) : ()
    	 		} qw(Listen);
-	my $apache_port = $parsed_config{Listen};
-	print $apache_port;
+	$APACHE_PORT = $parsed_config{Listen};
+	
+	# create object
+	my $xml = new XML::Simple;
+	# read XML file
+	my $data = $xml->XMLin("/usr/eBDAS/app/conf/ebd_config.xml") or die "Cannot Parse the Config File";
 
+	#print Dumper($data);
 	#  -Retrieve the ebd_server from ebd_config.xml file
+	$EBD_SERVER_PORT = $data->{eBDServer}->{Port};
+
 	#  -Retrieve the ebd_tserver port from ebd_config.xml or ebd.xml file
+	$EBD_TSERVER_PORT = $data->{TServer}->{Server}->{Port};
+
 	#  -retrieve the Catalog mysql server port from ebd_config.xml??
+	my $mysql_array_ref = $data->{TServer}->{DBDriver};
+
+	foreach(@$mysql_array_ref){
+		next if ($_->{Type}) ne ('MySQL');
+		$MYSQL_SERVER_PORT = $_->{DefaultPort};
+		last; 
+	}
 };
 ################BEGIN##################
 
-#load_config();
-#check_services();
-#check_global;
-#check_local;
+load_config();
 retrieve_ports();
+check_services();
+check_global;
