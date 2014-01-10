@@ -13,6 +13,7 @@ use LWP::UserAgent::DNS::Hosts;
 use Apache::ConfigParser;
 use XML::Simple;
 use IO::Socket::INET;
+use Shell::GetEnv;
 
 my $CONFIG;
 my $CONFIG_FILE = "agent_conf.yml";
@@ -20,6 +21,9 @@ my $APACHE_PORT;
 my $EBD_SERVER_PORT;
 my $EBD_TSERVER_PORT;
 my $MYSQL_SERVER_PORT;
+my $HOME_EBD;
+my $EBD_ENV;
+my $RETRY;
 
 sub load_config {
 ##Read The Configuration from a YAML file. 
@@ -39,6 +43,28 @@ sub load_config {
         }
         exit -1 if $error;
 =cut
+	#get the eBD home
+	$HOME_EBD = $CONFIG->{eBD}->{home};
+	
+	#get the number of Retries to get service UP (Apache,ebd_server,tserver)
+	$RETRY = $CONFIG->{services}->{retry};
+	
+	my $env_set =  "source $HOME_EBD/bin/ebd_env.sh ";
+	$EBD_ENV = Shell::GetEnv->new( 'sh', $env_set );
+	
+	my $command = "$HOME_EBD/bin/ebd_server start";
+	eval{
+		open my $run, '-|', $command or die $!;
+       		while (<$run>) {
+        		 print;
+        	}
+        close $run;
+	};
+
+	if ($@) {
+                warn $@;
+                #ToDo: Create a Hash with the Report Info
+        }
 }
 
 sub check_global {
@@ -99,21 +125,29 @@ sub check_services {
 	      		 );
 
 	while (my ($service, $port) = each %services){
-    
-		my $socket = IO::Socket::INET->new( PeerAddr => '127.0.0.1',
-		                		    PeerPort => $port,
-				                    Proto    => 'tcp'
-				                    #Type     => 'SOCK_STREAM'
-			    	                    );
-		if ($socket) {
-			warn "The service $service on port $port is UP!\n";
-                }else{
-			warn "The service $service on port $port is DOWN!\n";
-                }	
-		
+    		_do_check_port($service, $port);	
 	}
 	
 		
+};
+
+sub _do_check_port{
+
+	my ($service,$port,$retry) = @_;	
+ 
+	my $socket = IO::Socket::INET->new( PeerAddr => '127.0.0.1',
+                                            PeerPort => $port,
+                                            Proto    => 'tcp'
+                                            );
+        if ($socket) {
+        	warn "The service $service on port $port is UP!\n";
+        }else{
+         	warn "The service $service on port $port is DOWN!\n";
+		
+		$retry++;
+		
+        }
+
 };
 
 sub retrieve_ports {
@@ -143,10 +177,10 @@ sub retrieve_ports {
 	#  -Retrieve the ebd_server from ebd_config.xml file
 	$EBD_SERVER_PORT = $data->{eBDServer}->{Port};
 
-	#  -Retrieve the ebd_tserver port from ebd_config.xml or ebd.xml file
+	#Retrieve the ebd_tserver port from ebd_config.xml
 	$EBD_TSERVER_PORT = $data->{TServer}->{Server}->{Port};
 
-	#  -retrieve the Catalog mysql server port from ebd_config.xml??
+	#Retrieve the Catalog mysql server port from ebd_config.xml
 	my $mysql_array_ref = $data->{TServer}->{DBDriver};
 
 	foreach(@$mysql_array_ref){
@@ -160,4 +194,4 @@ sub retrieve_ports {
 load_config();
 retrieve_ports();
 check_services();
-check_global;
+check_global();

@@ -1,3 +1,7 @@
 domains:
   - www.ebdsoft.com
   - www.google.com
+eBD:
+  home: /usr/eBDAS
+services:
+  retry: 3
