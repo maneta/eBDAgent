@@ -3,5 +3,6 @@ domains:
   - www.google.com
 eBD:
   home: /usr/eBDAS
+  user: ebdas
 services:
   retry: 3

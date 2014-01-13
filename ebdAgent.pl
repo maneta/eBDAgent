@@ -14,6 +14,7 @@ use Apache::ConfigParser;
 use XML::Simple;
 use IO::Socket::INET;
 use Shell::GetEnv;
+use Unix::Passwd::File qw(get_user get_group);
 
 my $CONFIG;
 my $CONFIG_FILE = "agent_conf.yml";
@@ -22,6 +23,7 @@ my $EBD_SERVER_PORT;
 my $EBD_TSERVER_PORT;
 my $MYSQL_SERVER_PORT;
 my $HOME_EBD;
+my $USER_EBD;
 my $EBD_ENV;
 my $RETRY;
 
@@ -45,7 +47,8 @@ sub load_config {
 =cut
 	#get the eBD home
 	$HOME_EBD = $CONFIG->{eBD}->{home};
-	
+	$USER_EBD = $CONFIG->{eBD}->{user};	
+
 	#get the number of Retries to get service UP (Apache,ebd_server,tserver)
 	$RETRY = $CONFIG->{services}->{retry};
 	
@@ -156,7 +159,12 @@ sub _do_check_port{
 			$retry++;
 			my $command = "$HOME_EBD/bin/$service start";
 			print "$command\n";
-        		eval{
+        		
+			unless($service eq 'apache_server' && $port == 80) {
+				my $uid = get_user(user=>"$USER_EBD");
+				print Dumper($uid);
+			}
+			eval{
                 		open my $run, '-|', $command or die $!;
 				while (<$run>) {
 				 	sleep 1;
