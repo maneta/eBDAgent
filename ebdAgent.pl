@@ -52,19 +52,24 @@ sub load_config {
 	my $env_set =  "source $HOME_EBD/bin/ebd_env.sh ";
 	$EBD_ENV = Shell::GetEnv->new( 'sh', $env_set );
 	
-	my $command = "$HOME_EBD/bin/ebd_server start";
-	eval{
-		open my $run, '-|', $command or die $!;
-       		while (<$run>) {
-        		 print;
-        	}
-        close $run;
-	};
+#	my $command = "$HOME_EBD/bin/ebd_server start";
+	#chomp(my $output = `$command`);
+        #system("$command") or die $!;                                    
+        #print "after weird shit!!! \n";
 
-	if ($@) {
-                warn $@;
+#	eval{
+	#	open my $run, '-|', $command or die $!;
+       		#while (<$run>) {
+        		 #print;
+		#	 last;
+        	#}
+ #       close $run;
+#	};
+
+#	if ($@) {
+ #               warn $@;
                 #ToDo: Create a Hash with the Report Info
-        }
+  #      }
 }
 
 sub check_global {
@@ -118,14 +123,14 @@ sub check_local {
 	}
 }; 
 sub check_services {
-	my %services = ( apache => $APACHE_PORT,
+	my %services = ( apache_server => $APACHE_PORT,
 			 ebd_server => $EBD_SERVER_PORT,
 			 ebd_tserver => $EBD_TSERVER_PORT,
 			 mysql_server => $MYSQL_SERVER_PORT
 	      		 );
 
 	while (my ($service, $port) = each %services){
-    		_do_check_port($service, $port);	
+    		_do_check_port($service, $port, 0);	
 	}
 	
 		
@@ -144,10 +149,29 @@ sub _do_check_port{
         }else{
          	warn "The service $service on port $port is DOWN!\n";
 		
-		$retry++;
+		# Asumption that the MySQL service should and special Atention
+		if ($retry >= $RETRY || $service eq 'mysql_server'){
+			warn "Send Mail with $service and $port down\n";
+		}else{
+			$retry++;
+			my $command = "$HOME_EBD/bin/$service start";
+			print "$command\n";
+        		eval{
+                		open my $run, '-|', $command or die $!;
+				while (<$run>) {
+				 	sleep 1;
+				        last;
+				}
+				 
+        			close $run;
+        		};
+        		#if ($@) {
+                	#	warn $@;
+				_do_check_port($service,$port,$retry)
+               		#}
+		}
 		
         }
-
 };
 
 sub retrieve_ports {
