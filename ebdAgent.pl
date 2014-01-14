@@ -28,6 +28,17 @@ my $USER_EBD;
 my $EBD_ENV;
 my $RETRY;
 my $DISK_PERCENT_WARNING;
+my $SERVER_NAME;
+
+#The Report Hash
+my %REPORT = ( 	http_global => 'OK',
+		http_local => 'OK',
+		apache_server => 'OK',
+		ebd_server => 'OK',
+		ebd_tserver => 'OK',
+		mysql_server => 'OK',
+		disk_usage => 'OK'
+	     	);
 
 sub load_config {
 ##Read The Configuration from a YAML file. 
@@ -59,6 +70,10 @@ sub load_config {
 	#Get the disk usage percent warning 
 	$DISK_PERCENT_WARNING = $CONFIG->{warnings}->{disk};
 	
+	#Get the server name
+	$SERVER_NAME = $CONFIG->{server_name};
+
+	
 	my $env_set =  "source $HOME_EBD/bin/ebd_env.sh ";
 	$EBD_ENV = Shell::GetEnv->new( 'sh', $env_set );
 	
@@ -86,7 +101,10 @@ sub check_global {
 		if ($@) {
           		$retry++;
                 	if ($retry >= $RETRY){
-                        	warn "Send Mail with $@\n";
+                        	my $report = "The domain $domains is not accesible from the Internet, please check the Services. Error Code:   $@\n";
+				$REPORT{http_global} = $@;
+				send_report();
+				$REPORT{http_global} = 'OK';
                 	}else{
 				sleep 5;
                         	check_global();
@@ -110,7 +128,7 @@ sub check_local {
         	my $response = $ua->get("http://$_:$APACHE_PORT");
 		if ($response->is_success) {
 			$local_response = $response->title();
-			die  "Local HTML Title: $local_response does not Match with Global HTML Title: $global_response"
+			die  "Local HTML Global Title for the web $domain do not match with the Local Title. Please Review your proxy or Contact with your System Administrator.\n"
 			unless ($local_response eq $global_response);
 		}else{
                 	die $response->status_line;
@@ -119,7 +137,10 @@ sub check_local {
         if ($@) {
 		$retry++;
 		if ($retry >= $RETRY){
-                        warn "Send Mail with $@\n";
+			$REPORT{http_local} = $@;
+			send_report();
+			$REPORT{http_local} = 'OK';
+			
                 }else{
 			sleep 5;
 			check_local($domain,$global_response,$retry);	
@@ -156,7 +177,8 @@ sub _do_check_port{
 		
 		# Asumption that the MySQL service should and special Atention
 		if ($retry >= $RETRY || $service eq 'mysql_server'){
-			warn "Send Mail with $service and $port down\n";
+			my $report = "The service $service, port $port on the server $SERVER_NAME is Down\n";
+			$REPORT{$service} = $report;
 		}else{
 			$retry++;
 			my $command = "$HOME_EBD/bin/$service start";
@@ -182,10 +204,6 @@ sub _do_check_port{
 };
 
 sub retrieve_ports {
-	#ToDo:
-	#  -Retrieve the Apache Port from Listen directive on httpd.conf
-	#  Needs to get the EBD_HOME env variable in order to make it
-	#  Dynamic.
 
 	my $c1 = Apache::ConfigParser->new;
 	$c1->parse_file("$HOME_EBD/conf/httpd.conf")
@@ -204,8 +222,7 @@ sub retrieve_ports {
 	# read XML file
 	my $data = $xml->XMLin("$HOME_EBD/app/conf/ebd_config.xml") or die "Cannot Parse the Config File";
 
-	#print Dumper($data);
-	#  -Retrieve the ebd_server from ebd_config.xml file
+	#Retrieve the ebd_server from ebd_config.xml file
 	$EBD_SERVER_PORT = $data->{eBDServer}->{Port};
 
 	#Retrieve the ebd_tserver port from ebd_config.xml
@@ -221,21 +238,28 @@ sub retrieve_ports {
 	}
 };
 
-sub check_disk{
+sub check_disk {
 	my $ref = df("$HOME_EBD",1);  
   	if(defined($ref)) {
      		if ($ref->{per} >= $DISK_PERCENT_WARNING){
-			print "The Disk Usage is: ".$ref->{per}." Please Check the Disk\n";
+			my $report = "The Disk Usage for the Server $SERVER_NAME is: ".$ref->{per}." Please Check the Disk\n";
+                        $REPORT{disk_usage} = $report;
 		}	
 	}else{
-		warn "Cannot reach the Disk \n";
+		my $report = "Cannot reach the Disk on the Server $SERVER_NAME\n";
+		$REPORT{disk_usage} = $report;
 	}
 };
+
+sub send_report {
+	print Dumper(%REPORT);
+}; 
 
 #########################################################
 
 load_config();
 retrieve_ports();
 check_services();
-check_global();
 check_disk();
+check_global();
+send_report();

@@ -7,3 +7,6 @@ services:
   retry: 3
 warnings:
   disk: 60
+admin_mail:
+  - dcesario@ebdsoft.com
+server_name: showroom
