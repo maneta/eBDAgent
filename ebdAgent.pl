@@ -14,8 +14,7 @@ use Apache::ConfigParser;
 use XML::Simple;
 use IO::Socket::INET;
 use Shell::GetEnv;
-use Unix::Passwd::File qw(get_user get_group);
-use POSIX;
+use Unix::Passwd::File qw(get_user);
 
 my $CONFIG;
 my $CONFIG_FILE = "agent_conf.yml";
@@ -46,9 +45,11 @@ sub load_config {
         }
         exit -1 if $error;
 =cut
-	#get the eBD home
-	$HOME_EBD = $CONFIG->{eBD}->{home};
+	#get the eBD home	
 	$USER_EBD = $CONFIG->{eBD}->{user};	
+	my $user = get_user(user=>"$USER_EBD");
+        $HOME_EBD = $user->[2]->{home};
+
 
 	#get the number of Retries to get service UP (Apache,ebd_server,tserver)
 	$RETRY = $CONFIG->{services}->{retry};
@@ -56,29 +57,12 @@ sub load_config {
 	my $env_set =  "source $HOME_EBD/bin/ebd_env.sh ";
 	$EBD_ENV = Shell::GetEnv->new( 'sh', $env_set );
 	
-#	my $command = "$HOME_EBD/bin/ebd_server start";
-	#chomp(my $output = `$command`);
-        #system("$command") or die $!;                                    
-        #print "after weird shit!!! \n";
-
-#	eval{
-	#	open my $run, '-|', $command or die $!;
-       		#while (<$run>) {
-        		 #print;
-		#	 last;
-        	#}
- #       close $run;
-#	};
-
-#	if ($@) {
- #               warn $@;
-                #ToDo: Create a Hash with the Report Info
-  #      }
 }
 
 sub check_global {
 	my $global_response;
 	my $domains = $CONFIG->{domains};
+	my $retry = 0;
 	my $ua = LWP::UserAgent->new;
  	$ua->timeout(10);
 	$ua->agent('eBDAgent/1.0');
@@ -95,15 +79,21 @@ sub check_global {
  			}
 		}; 
 		if ($@) {
-			warn $@;
-			#ToDo: Create a Hash with the Report Info
+          		$retry++;
+                	if ($retry >= $RETRY){
+                        	warn "Send Mail with $@\n";
+                	}else{
+				sleep 5;
+                        	check_global();
+        		}
 		}else{
-			check_local($domain,$global_response);
+			check_local($domain,$global_response,0);
 		}
 	}
 };
+
 sub check_local {
-	my ($domain,$global_response) = @_;
+	my ($domain,$global_response,$retry) = @_;
 	my $local_response;
 	LWP::UserAgent::DNS::Hosts->register_host("$_" => '127.0.0.1',);
 	LWP::UserAgent::DNS::Hosts->enable_override;
@@ -122,10 +112,16 @@ sub check_local {
                 }
 	};
         if ($@) {
-		warn $@;
-		#ToDo: Create a Hash with the Report Info
+		$retry++;
+		if ($retry >= $RETRY){
+                        warn "Send Mail with $@\n";
+                }else{
+			sleep 5;
+			check_local($domain,$global_response,$retry);	
+		}
 	}
-}; 
+};
+ 
 sub check_services {
 	my %services = ( apache_server => $APACHE_PORT,
 			 ebd_server => $EBD_SERVER_PORT,
@@ -161,30 +157,20 @@ sub _do_check_port{
 			my $command = "$HOME_EBD/bin/$service start";
         		
 			unless($service eq 'apache_server' && $port == 80) {
-				
-=pod TO RECOVERY HOME			
-				my $user = get_user(user=>"$USER_EBD");
-				my $uid = $user->[2]->{uid};
-				my $gid = $user->[2]->{gid};
-=cut
-				
+
 				$command = "su $USER_EBD -c \"$HOME_EBD/bin/$service start\"";
 			}
 
 			eval{
                 		open my $run, '-|', $command or die $!;
 				while (<$run>) {
-					#print; 
-					sleep 2;
+					sleep 5;
 				        last;
 				}
 				 
         			close $run;
         		};
-        		#if ($@) {
-                	#	warn $@;
 				_do_check_port($service,$port,$retry)
-               		#}
 		}
 		
         }
@@ -197,7 +183,7 @@ sub retrieve_ports {
 	#  Dynamic.
 
 	my $c1 = Apache::ConfigParser->new;
-	$c1->parse_file('/usr/eBDAS/conf/httpd.conf')
+	$c1->parse_file("$HOME_EBD/conf/httpd.conf")
 	or die "Cannot Parse the Config File";
 	
 	#Somehow it works! finds the Listen Directive Value on the Apache
@@ -211,7 +197,7 @@ sub retrieve_ports {
 	# create object
 	my $xml = new XML::Simple;
 	# read XML file
-	my $data = $xml->XMLin("/usr/eBDAS/app/conf/ebd_config.xml") or die "Cannot Parse the Config File";
+	my $data = $xml->XMLin("$HOME_EBD/app/conf/ebd_config.xml") or die "Cannot Parse the Config File";
 
 	#print Dumper($data);
 	#  -Retrieve the ebd_server from ebd_config.xml file
