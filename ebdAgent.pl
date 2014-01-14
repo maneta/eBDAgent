@@ -15,6 +15,7 @@ use XML::Simple;
 use IO::Socket::INET;
 use Shell::GetEnv;
 use Unix::Passwd::File qw(get_user get_group);
+use POSIX;
 
 my $CONFIG;
 my $CONFIG_FILE = "agent_conf.yml";
@@ -158,16 +159,23 @@ sub _do_check_port{
 		}else{
 			$retry++;
 			my $command = "$HOME_EBD/bin/$service start";
-			print "$command\n";
         		
 			unless($service eq 'apache_server' && $port == 80) {
-				my $uid = get_user(user=>"$USER_EBD");
-				print Dumper($uid);
+				
+=pod TO RECOVERY HOME			
+				my $user = get_user(user=>"$USER_EBD");
+				my $uid = $user->[2]->{uid};
+				my $gid = $user->[2]->{gid};
+=cut
+				
+				$command = "su $USER_EBD -c \"$HOME_EBD/bin/$service start\"";
 			}
+
 			eval{
                 		open my $run, '-|', $command or die $!;
 				while (<$run>) {
-				 	sleep 1;
+					#print; 
+					sleep 2;
 				        last;
 				}
 				 
