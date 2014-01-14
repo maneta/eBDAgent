@@ -15,6 +15,7 @@ use XML::Simple;
 use IO::Socket::INET;
 use Shell::GetEnv;
 use Unix::Passwd::File qw(get_user);
+use Filesys::Df;
 
 my $CONFIG;
 my $CONFIG_FILE = "agent_conf.yml";
@@ -26,6 +27,7 @@ my $HOME_EBD;
 my $USER_EBD;
 my $EBD_ENV;
 my $RETRY;
+my $DISK_PERCENT_WARNING;
 
 sub load_config {
 ##Read The Configuration from a YAML file. 
@@ -53,6 +55,9 @@ sub load_config {
 
 	#get the number of Retries to get service UP (Apache,ebd_server,tserver)
 	$RETRY = $CONFIG->{services}->{retry};
+	
+	#Get the disk usage percent warning 
+	$DISK_PERCENT_WARNING = $CONFIG->{warnings}->{disk};
 	
 	my $env_set =  "source $HOME_EBD/bin/ebd_env.sh ";
 	$EBD_ENV = Shell::GetEnv->new( 'sh', $env_set );
@@ -215,9 +220,22 @@ sub retrieve_ports {
 		last; 
 	}
 };
-################BEGIN##################
+
+sub check_disk{
+	my $ref = df("$HOME_EBD",1);  
+  	if(defined($ref)) {
+     		if ($ref->{per} >= $DISK_PERCENT_WARNING){
+			print "The Disk Usage is: ".$ref->{per}." Please Check the Disk\n";
+		}	
+	}else{
+		warn "Cannot reach the Disk \n";
+	}
+};
+
+#########################################################
 
 load_config();
 retrieve_ports();
 check_services();
 check_global();
+check_disk();
