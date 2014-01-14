@@ -16,6 +16,8 @@ use IO::Socket::INET;
 use Shell::GetEnv;
 use Unix::Passwd::File qw(get_user);
 use Filesys::Df;
+use Email::Sender::Simple qw(sendmail);
+use Email::MIME;
 
 my $CONFIG;
 my $CONFIG_FILE = "agent_conf.yml";
@@ -29,15 +31,18 @@ my $EBD_ENV;
 my $RETRY;
 my $DISK_PERCENT_WARNING;
 my $SERVER_NAME;
+my $AGENT_EMAIL;
+my $ADMIN_EMAIL;
+my $REPORT_SEND = 0;
 
 #The Report Hash
-my %REPORT = ( 	http_global => 'OK',
-		http_local => 'OK',
-		apache_server => 'OK',
-		ebd_server => 'OK',
-		ebd_tserver => 'OK',
-		mysql_server => 'OK',
-		disk_usage => 'OK'
+my %REPORT = ( 	http_global => "OK\n",
+		http_local => "OK\n",
+		apache_server => "OK\n",
+		ebd_server => "OK\n",
+		ebd_tserver => "OK\n",
+		mysql_server => "OK\n",
+		disk_usage => "OK\n"
 	     	);
 
 sub load_config {
@@ -72,7 +77,10 @@ sub load_config {
 	
 	#Get the server name
 	$SERVER_NAME = $CONFIG->{server_name};
-
+	
+	#Get the agent & admin(s) email(s)
+	$AGENT_EMAIL = $CONFIG->{agent_email};
+	$ADMIN_EMAIL = $CONFIG->{admin_email};
 	
 	my $env_set =  "source $HOME_EBD/bin/ebd_env.sh ";
 	$EBD_ENV = Shell::GetEnv->new( 'sh', $env_set );
@@ -103,8 +111,13 @@ sub check_global {
                 	if ($retry >= $RETRY){
                         	my $report = "The domain $domains is not accesible from the Internet, please check the Services. Error Code:   $@\n";
 				$REPORT{http_global} = $@;
+				$REPORT_SEND = 1;
 				send_report();
+				
+				#Cleaning the report send variable and restoring the Hash 
+				#for its default value
 				$REPORT{http_global} = 'OK';
+				$REPORT_SEND = 0;
                 	}else{
 				sleep 5;
                         	check_global();
@@ -138,8 +151,13 @@ sub check_local {
 		$retry++;
 		if ($retry >= $RETRY){
 			$REPORT{http_local} = $@;
+			$REPORT_SEND = 1;
 			send_report();
+			
+			#Cleaning the report send variable and restoring the Hash 
+			#for its default value
 			$REPORT{http_local} = 'OK';
+			$REPORT_SEND = 0;
 			
                 }else{
 			sleep 5;
@@ -177,8 +195,9 @@ sub _do_check_port{
 		
 		# Asumption that the MySQL service should and special Atention
 		if ($retry >= $RETRY || $service eq 'mysql_server'){
-			my $report = "The service $service, port $port on the server $SERVER_NAME is Down\n";
+			my $report = "The $service, port $port on the server $SERVER_NAME is Down\n";
 			$REPORT{$service} = $report;
+			$REPORT_SEND = 1;
 		}else{
 			$retry++;
 			my $command = "$HOME_EBD/bin/$service start";
@@ -242,17 +261,46 @@ sub check_disk {
 	my $ref = df("$HOME_EBD",1);  
   	if(defined($ref)) {
      		if ($ref->{per} >= $DISK_PERCENT_WARNING){
-			my $report = "The Disk Usage for the Server $SERVER_NAME is: ".$ref->{per}." Please Check the Disk\n";
+			my $report = "The Disk Usage for the Server $SERVER_NAME is: ".$ref->{per}."% Please Check the Disk\n";
                         $REPORT{disk_usage} = $report;
+			$REPORT_SEND = 1;
 		}	
 	}else{
 		my $report = "Cannot reach the Disk on the Server $SERVER_NAME\n";
 		$REPORT{disk_usage} = $report;
+		$REPORT_SEND = 1;
 	}
 };
 
 sub send_report {
-	print Dumper(%REPORT);
+	
+	if($REPORT_SEND == 1){
+	
+	  foreach(@$ADMIN_EMAIL){
+		my $message = Email::MIME->create(
+                            	header_str => [
+                                From => "$AGENT_EMAIL",
+                                To => "$_",
+                                Subject => "[eBD Agent] - Server: $SERVER_NAME Report",
+                            	],
+                            	attributes => {
+                                encoding => 'quoted-printable',
+                                charset => 'ISO-8859-1',
+                            	},
+                            	body_str => "This is the  Server $SERVER_NAME Report: \n \n".
+					    "The GLOBAL WebService Status is: ".$REPORT{http_global}.
+					    "The LOCAL WebService Status is: ".$REPORT{http_local}.
+					    "The Apache service Status is: ".$REPORT{apache_server}.
+					    "The EBD SERVER service Status is: ".$REPORT{ebd_server}.
+					    "The EBD TSERVER service Status is: ".$REPORT{ebd_tserver}.
+					    "The MySQL service Status is: ".$REPORT{mysql_server}.
+					    "The Disk Usage Status is: ".$REPORT{disk_usage}.
+					    "\n Please Review your Server"
+					    ,
+                        	);
+		sendmail($message);
+	  }
+	}
 }; 
 
 #########################################################
